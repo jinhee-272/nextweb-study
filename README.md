@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# Directory 경로 
-
 ### Directory 경로
 ```
    app
@@ -161,6 +158,388 @@
 
 ### 토큰 발급
 
-=======
-# nextweb-study
->>>>>>> 62a22ffd1f07d96536740eb17c9576f90dda8e3a
+# 🔐 Token + HTTP + Exception Handling Architecture
+
+> 토큰 기반 인증 + 자동 재발급 + 공통 에러 처리 구조를 통합 설계한 아키텍처
+
+---
+
+## 📌 Overview
+
+본 구조는 API 통신 과정에서 발생하는 인증 및 에러 처리 문제를 해결하기 위해 설계되었습니다.
+
+특히 다음을 목표로 합니다:
+
+* 🔑 토큰 자동 발급 및 관리
+* 🔄 만료 토큰 자동 재발급 (Retry)
+* ⚠️ 에러 타입별 처리 (Api / Http / Network / System)
+* 🧩 공통 Handler를 통한 중앙 집중 처리
+
+---
+
+## 🏗️ Architecture Flow
+
+```text
+Page → Route → HttpFetch
+                ↓
+          Token 검사
+        (없음 / 만료)
+                ↓
+         Token 발급 요청
+                ↓
+            API 호출
+                ↓
+       40101 / 40102 발생
+                ↓
+         토큰 재발급
+                ↓
+            재요청 (Retry)
+                ↓
+          Handler → Exception → Logger
+```
+
+---
+
+## 📊 Diagram
+
+```plantuml
+@startuml
+title Token + Http + Exception 처리 구조
+
+Page --> Route : /api/token 호출
+Route --> HttpFetch : API 호출
+
+HttpFetch --> tokenStore : 토큰 조회
+HttpFetch --> tokenAccess : 토큰 발급 요청
+
+tokenAccess --> Hmac : Hmac 생성
+tokenAccess --> TokenHttp : 토큰 API 호출
+tokenAccess --> tokenStore : 토큰 저장
+
+TokenHttp --> tokenStore : 토큰 사용
+
+TokenHttp --> Handler
+Handler --> Exception
+Handler --> Logger
+
+HttpFetch --> tokenAccess : 40101/40102 발생 시 재발급
+HttpFetch --> Handler
+@enduml
+```
+
+---
+
+## 🧩 Core Components
+
+### 1. HttpFetch (핵심 진입점)
+
+* API 호출 전 토큰 상태 확인
+* 토큰 없거나 만료 시 자동 발급
+* 401 에러 발생 시 재발급 후 재요청
+
+```ts
+async function HttpFetch(options) {
+  let token = tokenStore.getToken();
+
+  if (!token) {
+    token = await tokenAccess.callToken();
+  }
+
+  try {
+    return await fetchWithToken(options, token);
+  } catch (error) {
+    if (error.code === "40101" || error.code === "40102") {
+      const newToken = await tokenAccess.callToken();
+      return await fetchWithToken(options, newToken);
+    }
+    throw error;
+  }
+}
+```
+
+---
+
+### 2. tokenAccess
+
+* 토큰 발급 전용 모듈
+* Hmac 기반 인증 처리 후 토큰 요청
+
+```ts
+async function callToken() {
+  const signature = Hmac.create();
+  const token = await TokenHttp({ signature });
+  tokenStore.setToken(token);
+  return token;
+}
+```
+
+---
+
+### 3. tokenStore
+
+* 토큰 저장 및 조회 담당 (싱글톤 형태)
+
+```ts
+let token = null;
+
+export const tokenStore = {
+  getToken: () => token,
+  setToken: (newToken) => (token = newToken),
+};
+```
+
+---
+
+### 4. Handler + Exception
+
+* 모든 에러를 공통 처리
+* 타입별로 분류 후 대응
+
+```ts
+async function withErrorHandling(callback) {
+  try {
+    return await callback();
+  } catch (error) {
+    errorLog(error);
+    throw mapToException(error);
+  }
+}
+```
+
+---
+
+## ⚠️ Exception Types
+
+```ts
+ApiException
+HttpException
+NetworkException
+SystemException
+```
+
+---
+
+## 💡 Design Highlights
+
+* 🔹 **Token Lifecycle 관리 자동화**
+* 🔹 **401 에러 기반 재시도 로직 구현**
+* 🔹 **에러 처리 중앙 집중화**
+* 🔹 **비즈니스 로직과 인증 로직 분리**
+
+---
+
+## 🚀 Why This Matters
+
+이 구조는 단순한 API 호출을 넘어:
+
+👉 인증 + 재시도 + 에러 처리까지 통합한
+**실무형 HTTP Client 아키텍처**입니다.
+
+---
+
+## 📁 Suggested Structure
+
+```bash
+src/
+ ┣ api/
+ ┃ ┣ http/
+ ┃ ┣ token/
+ ┣ exceptions/
+ ┣ utils/
+ ┗ services/
+```
+
+---
+
+## 🔮 Future Improvements
+
+* [ ] Axios Interceptor로 구조 개선
+* [ ] Refresh Token 구조 추가
+* [ ] 토큰 만료 시간 기반 사전 갱신
+* [ ] 에러 모니터링 시스템 연동 (Sentry)
+
+---
+
+
+
+### Exception 
+
+# 🚀 Frontend Sprint Project
+
+> 공통 에러 처리 아키텍처를 설계하고 적용한 프론트엔드 학습 프로젝트
+
+---
+
+## 📌 Overview
+
+이 프로젝트는 API 통신 과정에서 발생하는 다양한 에러를 **일관된 방식으로 처리하기 위해 설계된 구조**를 포함합니다.
+
+단순한 try/catch를 넘어,
+👉 **에러를 타입별로 분류하고 중앙에서 관리하는 구조**를 구현했습니다.
+
+---
+
+## 🧩 Key Features
+
+* ✅ 공통 Error Handling Wrapper (`withErrorHandling`)
+* ✅ API 응답 타입 안전 처리 (`resolveApiResponse`)
+* ✅ 에러 타입 분리 (Api / Http / Network / System)
+* ✅ 중앙 집중식 로깅 처리
+* ✅ 재사용 가능한 구조 설계
+
+---
+
+## 🏗️ Architecture
+
+```text
+API Call
+   ↓
+withErrorHandling
+   ↓
+resolveApiResponse
+   ↓
+Success / Error 분기
+   ↓
+ExceptionType 분류
+   ↓
+Logger 기록
+```
+
+---
+
+## 📊 Diagram
+
+```plantuml
+@startuml
+package CommonException {
+title Exception 처리구조
+
+package Handler {
+    interface withErrorHandling {
+        ..try..
+        await callback()
+        ..
+        ..catch..
+        ApiException
+        HttpException
+        NetworkException
+        SystemException
+    }
+}
+
+package Exception {
+    interface resolveApiResponse {
+        TypeGuard
+        response : Success → FetchSuccessResponse
+        response : Error → ApiException
+    }
+
+    class ExceptionType {
+        ApiException
+        HttpException
+        NetworkException
+        SystemException
+    }
+}
+
+package Logger {
+    interface errorLog {
+        errorLog()
+    }
+}
+
+withErrorHandling --> resolveApiResponse
+withErrorHandling --> ExceptionType
+withErrorHandling --> errorLog
+}
+@enduml
+```
+
+---
+
+## ⚙️ How It Works
+
+### 1. withErrorHandling
+
+모든 API 요청을 감싸는 공통 함수
+
+```ts
+async function withErrorHandling(callback) {
+  try {
+    return await callback();
+  } catch (error) {
+    // 에러 타입 분류
+    // 로깅 처리
+    throw error;
+  }
+}
+```
+
+---
+
+### 2. resolveApiResponse
+
+API 응답을 성공 / 실패로 분기 처리
+
+```ts
+function resolveApiResponse(response) {
+  if (response.success) {
+    return response.data;
+  }
+  throw new ApiException(response);
+}
+```
+
+---
+
+### 3. Exception Types
+
+```ts
+class ApiException extends Error {}
+class HttpException extends Error {}
+class NetworkException extends Error {}
+class SystemException extends Error {}
+```
+
+---
+
+### 4. Logger
+
+```ts
+function errorLog(error) {
+  console.error(error);
+}
+```
+
+---
+
+## 💡 Design Goals
+
+* 🔹 에러 처리 로직의 중앙 집중화
+* 🔹 타입 기반 에러 분류
+* 🔹 유지보수성과 확장성 향상
+* 🔹 코드 중복 제거
+
+---
+
+## 📁 Project Structure
+
+```bash
+src/
+ ┣ api/
+ ┣ exceptions/
+ ┣ utils/
+ ┗ services/
+```
+
+---
+
+## 🚀 Future Improvements
+
+* [ ] Axios 인터셉터 적용
+* [ ] 사용자 친화적 에러 메시지 UI
+* [ ] Sentry 연동 (에러 모니터링)
+* [ ] 테스트 코드 추가
+
+---
+
